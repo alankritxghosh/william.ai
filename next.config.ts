@@ -138,8 +138,13 @@ const sentryConfig = {
   // Hide source maps from generated client bundles
   hideSourceMaps: true,
 
-  // Automatically tree-shake Sentry logger statements to reduce bundle size
-  disableLogger: true,
+  // Tree-shake Sentry logger statements to reduce bundle size
+  // Using the new webpack.treeshake config instead of deprecated disableLogger
+  webpack: {
+    treeshake: {
+      removeDebugLogging: true,
+    },
+  },
 
   // Tunnel Sentry events through your own server to avoid ad blockers
   // Uncomment if you set up a tunnel endpoint

@@ -1,11 +1,14 @@
 /**
- * Next.js Middleware
+ * Next.js Proxy (formerly Middleware)
  * 
  * Handles:
  * - Authentication protection for routes
  * - CORS configuration (restrictive)
  * - Request validation
  * - Security checks
+ * 
+ * Note: In Next.js 16+, middleware.ts is renamed to proxy.ts
+ * and the export is renamed from `middleware` to `proxy`
  */
 
 import { NextResponse } from "next/server";
@@ -31,6 +34,7 @@ const publicRoutes = [
   "/auth/signin",
   "/auth/error",
   "/api/auth",
+  "/api/health",
 ];
 
 // API routes
@@ -60,10 +64,11 @@ const getAllowedOrigins = (): string[] => {
 };
 
 // ==========================================
-// MIDDLEWARE
+// PROXY (formerly MIDDLEWARE)
 // ==========================================
 
-export default auth((req) => {
+// NextAuth.js auth wrapper - this creates the proxy function
+const authProxy = auth((req) => {
   const { pathname } = req.nextUrl;
   const isLoggedIn = !!req.auth;
 
@@ -127,6 +132,10 @@ export default auth((req) => {
 
   return response;
 });
+
+// Export as `proxy` for Next.js 16+ (with fallback export as `middleware` for compatibility)
+export const proxy = authProxy;
+export default authProxy;
 
 // ==========================================
 // CORS HELPERS

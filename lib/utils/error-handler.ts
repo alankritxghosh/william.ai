@@ -3,10 +3,18 @@
  * 
  * Provides consistent error handling across the application with:
  * - Error classification
- * - User-friendly messages
- * - Logging for debugging
+ * - User-friendly messages (sanitized for security)
+ * - Logging for debugging (server-side only)
  * - Recovery suggestions
  */
+
+import { 
+  sanitizeError, 
+  logServerError, 
+  containsSensitiveInfo,
+  captureToSentry,
+  addSentryBreadcrumb,
+} from "@/lib/security/error-sanitizer";
 
 // Error Types
 export enum ErrorType {
@@ -147,24 +155,26 @@ export function classifyError(error: unknown): ErrorType {
 
 /**
  * Create a structured app error from any error
+ * Sanitizes error messages to prevent information leakage
  */
 export function createAppError(error: unknown, context?: string): AppError {
   const type = classifyError(error);
   const errorConfig = ERROR_MESSAGES[type];
 
-  let message = "Unknown error";
-  let code: string | undefined;
+  // Use the sanitizer to get safe error info
+  const sanitized = sanitizeError(error, type);
 
-  if (error instanceof Error) {
-    message = error.message;
-    code = (error as Error & { code?: string }).code;
-  } else if (typeof error === "string") {
-    message = error;
+  let message = sanitized.message;
+  const code = sanitized.code;
+
+  // Add context if provided (context is controlled by our code, so it's safe)
+  if (context) {
+    message = `${context}: ${message}`;
   }
 
   return {
     type,
-    message: context ? `${context}: ${message}` : message,
+    message, // This is now sanitized
     userMessage: errorConfig.default,
     code,
     recoverable: type !== ErrorType.AUTH && type !== ErrorType.NOT_FOUND,
@@ -173,30 +183,75 @@ export function createAppError(error: unknown, context?: string): AppError {
 }
 
 /**
- * Log error for debugging (would integrate with Sentry in production)
+ * Log error for debugging (sanitizes sensitive info before logging)
+ * Also captures to Sentry with appropriate severity level
  */
 export function logError(error: AppError, metadata?: Record<string, unknown>): void {
-  const logData = {
-    timestamp: new Date().toISOString(),
-    type: error.type,
-    message: error.message,
-    code: error.code,
-    ...metadata,
-  };
+  // Determine Sentry severity level based on error type
+  const sentryLevel = getSentrySeverityLevel(error.type);
+  
+  // Add a breadcrumb for error tracking
+  addSentryBreadcrumb(
+    `Error occurred: ${error.type}`,
+    "error",
+    { code: error.code, recoverable: error.recoverable },
+    "error"
+  );
 
-  // In development, log to console
-  if (process.env.NODE_ENV === "development") {
-    console.error("[William.ai Error]", logData);
+  // Use the secure error logger for server-side
+  if (typeof window === "undefined") {
+    logServerError(error, {
+      type: error.type,
+      code: error.code,
+      ...metadata,
+    });
+    return;
   }
 
-  // In production, this would send to error tracking service
-  // TODO: Integrate with Sentry or similar service
-  // if (typeof window !== "undefined" && window.Sentry) {
-  //   window.Sentry.captureException(new Error(error.message), {
-  //     tags: { type: error.type },
-  //     extra: logData,
-  //   });
-  // }
+  // Client-side: capture to Sentry
+  captureToSentry(error, {
+    type: error.type,
+    code: error.code,
+    recoverable: error.recoverable,
+    ...metadata,
+  }, sentryLevel);
+
+  // Client-side logging (limited info in development)
+  if (process.env.NODE_ENV === "development") {
+    // Sanitize the message before logging even in development
+    const safeMessage = containsSensitiveInfo(error.message) 
+      ? error.userMessage 
+      : error.message;
+    
+    console.error("[William.ai Error]", {
+      type: error.type,
+      message: safeMessage,
+      code: error.code,
+    });
+  }
+}
+
+/**
+ * Map error types to Sentry severity levels
+ */
+function getSentrySeverityLevel(errorType: ErrorType): "fatal" | "error" | "warning" | "info" {
+  switch (errorType) {
+    case ErrorType.AUTH:
+    case ErrorType.NOT_FOUND:
+      return "warning"; // Expected errors, not critical
+    case ErrorType.RATE_LIMIT:
+      return "info"; // Expected under load
+    case ErrorType.NETWORK:
+    case ErrorType.STORAGE:
+    case ErrorType.VALIDATION:
+      return "warning"; // User or environment issues
+    case ErrorType.API:
+    case ErrorType.AI_GENERATION:
+      return "error"; // Our issues that need attention
+    case ErrorType.UNKNOWN:
+    default:
+      return "error"; // Unknown errors need investigation
+  }
 }
 
 /**

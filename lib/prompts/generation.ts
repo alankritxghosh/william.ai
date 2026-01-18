@@ -1,5 +1,6 @@
 import { VoiceMode, VoiceProfile, InterviewResponse } from "@/lib/types";
 import { ALL_FORBIDDEN_PHRASES } from "@/lib/guardrails/forbidden-phrases";
+import { sanitizeForPrompt, escapePromptContent, createSafePromptSection } from "@/lib/security/sanitizer";
 
 // Stage 1: Generate 5 different versions
 export function getStage1Prompt(
@@ -7,9 +8,13 @@ export function getStage1Prompt(
   voiceMode: VoiceMode,
   voiceProfile: VoiceProfile
 ): string {
+  // Sanitize all user-provided content before including in prompt
   const answersText = Object.entries(interview.answers)
     .filter(([, value]) => value)
-    .map(([key, value]) => `${key}: ${value}`)
+    .map(([key, value]) => {
+      const sanitized = sanitizeForPrompt(value, 5000);
+      return `${key}: ${escapePromptContent(sanitized.sanitized)}`;
+    })
     .join("\n\n");
 
   return `You are generating LinkedIn/Twitter content that sounds HUMAN-WRITTEN, not AI-generated.
@@ -25,9 +30,9 @@ Sentence patterns:
 ${voiceMode.sentencePatterns.map(p => `- ${p}`).join("\n")}
 
 === VOICE PROFILE RULES ===
-${voiceProfile.rules.sentencePatterns.map(p => `- ${p}`).join("\n")}
+${voiceProfile.rules.sentencePatterns.map(p => `- ${escapePromptContent(p)}`).join("\n")}
 
-Signature phrases to potentially use: ${voiceProfile.rules.signaturePhrases.join(", ")}
+Signature phrases to potentially use: ${voiceProfile.rules.signaturePhrases.map(p => escapePromptContent(p)).join(", ")}
 
 === FORBIDDEN PHRASES (NEVER USE ANY OF THESE) ===
 ${ALL_FORBIDDEN_PHRASES.slice(0, 50).join(", ")}
@@ -165,10 +170,20 @@ export function getStage5Prompt(
   hookOptimizedVersion: string,
   voiceProfile: VoiceProfile
 ): string {
+  // Sanitize user-provided content (top posts and signature phrases)
   const topPostsText = voiceProfile.topPosts
     .slice(0, 2)
-    .map((p, i) => `Reference Post ${i + 1}:\n${p.content}`)
+    .map((p, i) => {
+      const sanitized = sanitizeForPrompt(p.content, 5000);
+      return `Reference Post ${i + 1}:\n${escapePromptContent(sanitized.sanitized)}`;
+    })
     .join("\n\n");
+
+  const sanitizedSignaturePhrases = voiceProfile.rules.signaturePhrases
+    .map(p => {
+      const sanitized = sanitizeForPrompt(p, 200);
+      return escapePromptContent(sanitized.sanitized);
+    });
 
   return `You are adding personality to make this post sound uniquely like the author.
 
@@ -176,7 +191,7 @@ export function getStage5Prompt(
 ${hookOptimizedVersion}
 
 === SIGNATURE PHRASES TO POTENTIALLY USE ===
-${voiceProfile.rules.signaturePhrases.map(p => `- "${p}"`).join("\n")}
+${sanitizedSignaturePhrases.map(p => `- "${p}"`).join("\n")}
 
 === REFERENCE POSTS (for voice matching) ===
 ${topPostsText}

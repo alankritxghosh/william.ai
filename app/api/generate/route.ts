@@ -2,41 +2,65 @@ import { NextRequest, NextResponse } from "next/server";
 import { generatePost } from "@/lib/pipeline/multi-stage";
 import { InterviewResponse, VoiceProfile } from "@/lib/types";
 import { withRateLimit, getClientIdentifier, createRateLimitHeaders, checkRateLimit } from "@/lib/utils/rate-limiter";
+import { generateRequestSchema, validateRequest } from "@/lib/validation/schemas";
 
 export const maxDuration = 60; // 60 second timeout for generation
 
+// Maximum request body size (500KB)
+const MAX_BODY_SIZE = 500 * 1024;
+
 export async function POST(request: NextRequest) {
-  // Check rate limit first
-  const rateLimitResponse = withRateLimit(request);
+  // Check rate limit first (using stricter "generate" limit)
+  const rateLimitResponse = await withRateLimit(request, "generate");
   if (rateLimitResponse) {
     return rateLimitResponse;
   }
 
   try {
-    const { interview, voiceProfile } = await request.json() as {
-      interview: InterviewResponse;
-      voiceProfile: VoiceProfile;
-    };
-
-    if (!interview || !voiceProfile) {
+    // Check content length header if available
+    const contentLength = request.headers.get("content-length");
+    if (contentLength && parseInt(contentLength) > MAX_BODY_SIZE) {
       return NextResponse.json(
         {
           success: false,
           error: {
-            message: "Missing interview data or voice profile",
-            code: "INVALID_INPUT",
+            message: "Request body too large",
+            code: "PAYLOAD_TOO_LARGE",
+          },
+        },
+        { status: 413 }
+      );
+    }
+
+    // Parse and validate request body
+    const body = await request.json();
+    
+    const validation = validateRequest(generateRequestSchema, body);
+    if (!validation.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            message: validation.error,
+            code: "VALIDATION_ERROR",
           },
         },
         { status: 400 }
       );
     }
 
+    const { interview, voiceProfile } = validation.data;
+
     // Generate the post using the pipeline
-    const post = await generatePost(interview, voiceProfile);
+    // Cast to the internal types (validation ensures structure is correct)
+    const post = await generatePost(
+      interview as unknown as InterviewResponse,
+      voiceProfile as unknown as VoiceProfile
+    );
     
     // Get rate limit info for response headers
     const identifier = getClientIdentifier(request);
-    const rateLimitStatus = checkRateLimit(identifier);
+    const rateLimitStatus = await checkRateLimit(identifier, "generate");
     const rateLimitHeaders = createRateLimitHeaders(rateLimitStatus);
 
     return NextResponse.json(
@@ -51,13 +75,12 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Generation error:", error);
     
-    const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
-    
+    // Return generic error message to prevent information leakage
     return NextResponse.json(
       {
         success: false,
         error: {
-          message: errorMessage,
+          message: "An error occurred during generation. Please try again.",
           code: "GENERATION_ERROR",
         },
       },

@@ -4,6 +4,7 @@ import { Analytics } from "@vercel/analytics/react";
 import "./globals.css";
 import { VoiceProfileProvider } from "@/lib/context/VoiceProfileContext";
 import { PostProvider } from "@/lib/context/PostContext";
+import { SessionProvider } from "@/lib/auth/SessionProvider";
 import { Toaster } from "@/components/ui/toaster";
 import { Navigation } from "@/components/Navigation";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -23,19 +24,21 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <ErrorBoundary>
-          <VoiceProfileProvider>
-            <PostProvider>
-              <div className="min-h-screen flex flex-col">
-                <Navigation />
-                <main className="flex-1">
-                  {children}
-                </main>
-              </div>
-              <Toaster />
-            </PostProvider>
-          </VoiceProfileProvider>
-        </ErrorBoundary>
+        <SessionProvider>
+          <ErrorBoundary>
+            <VoiceProfileProvider>
+              <PostProvider>
+                <div className="min-h-screen flex flex-col">
+                  <Navigation />
+                  <main className="flex-1">
+                    {children}
+                  </main>
+                </div>
+                <Toaster />
+              </PostProvider>
+            </VoiceProfileProvider>
+          </ErrorBoundary>
+        </SessionProvider>
         <Analytics />
       </body>
     </html>

@@ -26,7 +26,16 @@
         "./*"
       ]
     },
-    "target": "ES2017"
+    "target": "ES2017",
+    
+    // Additional strict type checking options
+    // Note: noUncheckedIndexedAccess disabled as it requires extensive refactoring
+    // Enable once array access patterns are updated throughout the codebase
+    "noUncheckedIndexedAccess": false,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "exactOptionalPropertyTypes": false
   },
   "include": [
     "next-env.d.ts",

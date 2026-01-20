@@ -106,9 +106,22 @@ export function saveVoiceProfiles(profiles: VoiceProfile[]): void {
 export function loadVoiceProfiles(): VoiceProfile[] {
   try {
     const data = localStorage.getItem(STORAGE_KEYS.VOICE_PROFILES);
-    return data ? JSON.parse(data) : [];
+    if (!data) return [];
+    
+    const parsed = JSON.parse(data);
+    
+    // Validate that it's actually an array of profiles
+    if (!Array.isArray(parsed)) {
+      console.warn("Voice profiles data is corrupted (not an array). Resetting.");
+      localStorage.removeItem(STORAGE_KEYS.VOICE_PROFILES);
+      return [];
+    }
+    
+    return parsed;
   } catch (error) {
-    console.error("Failed to load voice profiles:", error);
+    // JSON parse failed - data is corrupted (likely from failed encryption)
+    console.error("Failed to load voice profiles - data corrupted. Resetting localStorage.", error);
+    localStorage.removeItem(STORAGE_KEYS.VOICE_PROFILES);
     return [];
   }
 }
@@ -173,9 +186,22 @@ export function savePosts(posts: GeneratedPost[]): void {
 export function loadPosts(): GeneratedPost[] {
   try {
     const data = localStorage.getItem(STORAGE_KEYS.POSTS);
-    return data ? JSON.parse(data) : [];
+    if (!data) return [];
+    
+    const parsed = JSON.parse(data);
+    
+    // Validate that it's actually an array of posts
+    if (!Array.isArray(parsed)) {
+      console.warn("Posts data is corrupted (not an array). Resetting.");
+      localStorage.removeItem(STORAGE_KEYS.POSTS);
+      return [];
+    }
+    
+    return parsed;
   } catch (error) {
-    console.error("Failed to load posts:", error);
+    // JSON parse failed - data is corrupted (likely from failed encryption)
+    console.error("Failed to load posts - data corrupted. Resetting localStorage.", error);
+    localStorage.removeItem(STORAGE_KEYS.POSTS);
     return [];
   }
 }
@@ -222,9 +248,13 @@ export function saveDraft(draft: Partial<InterviewResponse>): void {
 export function loadDraft(): Partial<InterviewResponse> | null {
   try {
     const data = localStorage.getItem(STORAGE_KEYS.INTERVIEW_DRAFT);
-    return data ? JSON.parse(data) : null;
+    if (!data) return null;
+    
+    return JSON.parse(data);
   } catch (error) {
-    console.error("Failed to load draft:", error);
+    // JSON parse failed - data is corrupted
+    console.error("Failed to load draft - data corrupted. Clearing.", error);
+    localStorage.removeItem(STORAGE_KEYS.INTERVIEW_DRAFT);
     return null;
   }
 }

@@ -11,7 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { useVoiceProfiles } from "@/lib/context/VoiceProfileContext";
 import { toast } from "@/hooks/use-toast";
-import { ChevronLeft, ChevronRight, Check, Sparkles } from "lucide-react";
+import { ChevronLeft, ChevronRight, Check, Sparkles, Loader2 } from "lucide-react";
 
 const STEPS = [
   { id: 1, title: "Basic Info", description: "Name your voice profile" },
@@ -55,6 +55,7 @@ export default function NewVoiceProfilePage() {
   const [primaryColor, setPrimaryColor] = useState("#3B82F6");
   const [secondaryColor, setSecondaryColor] = useState("#8B5CF6");
   const [accentColor, setAccentColor] = useState("#10B981");
+  const [isSaving, setIsSaving] = useState(false);
 
   const parseToArray = (text: string): string[] => {
     return text
@@ -124,70 +125,77 @@ export default function NewVoiceProfilePage() {
   };
 
   const handleSave = async () => {
-    let topPosts;
+    if (isSaving) return;
+    setIsSaving(true);
     
-    if (useReferenceCreator) {
-      // Use reference creator posts
-      topPosts = referenceCreatorPosts
-        .filter(p => p.length > 0)
-        .map(content => ({
-          content,
-          platform: referenceCreatorPlatform,
-          engagement: 0,
-        }));
-    } else {
-      // Use own posts
-      topPosts = [post1, post2, post3]
-        .filter(p => p.content.length > 0)
-        .map(p => ({
-          content: p.content,
-          platform: platforms[0] as "linkedin" | "twitter",
-          engagement: p.engagement,
-        }));
-    }
+    try {
+      let topPosts;
+      
+      if (useReferenceCreator) {
+        // Use reference creator posts
+        topPosts = referenceCreatorPosts
+          .filter(p => p.length > 0)
+          .map(content => ({
+            content,
+            platform: referenceCreatorPlatform,
+            engagement: 0,
+          }));
+      } else {
+        // Use own posts
+        topPosts = [post1, post2, post3]
+          .filter(p => p.content.length > 0)
+          .map(p => ({
+            content: p.content,
+            platform: platforms[0] as "linkedin" | "twitter",
+            engagement: p.engagement,
+          }));
+      }
 
-    const profile = await createProfile({
-      name,
-      rules: {
-        sentencePatterns: parseToArray(sentencePatterns),
-        forbiddenWords: parseToArray(forbiddenWords),
-        signaturePhrases: parseToArray(signaturePhrases),
-        rhythmPreferences: {
-          avgSentenceLength,
-          paragraphBreaks,
-          punchlinePosition,
-          questionUsage,
+      const profile = await createProfile({
+        name,
+        rules: {
+          sentencePatterns: parseToArray(sentencePatterns),
+          forbiddenWords: parseToArray(forbiddenWords),
+          signaturePhrases: parseToArray(signaturePhrases),
+          rhythmPreferences: {
+            avgSentenceLength,
+            paragraphBreaks,
+            punchlinePosition,
+            questionUsage,
+          },
+          formattingRules: {
+            useEmDash,
+            useBulletPoints,
+            useNumberedLists,
+            emojiUsage,
+          },
         },
-        formattingRules: {
-          useEmDash,
-          useBulletPoints,
-          useNumberedLists,
-          emojiUsage,
+        topPosts,
+        brandColors: {
+          primary: primaryColor,
+          secondary: secondaryColor,
+          accent: accentColor,
         },
-      },
-      topPosts,
-      brandColors: {
-        primary: primaryColor,
-        secondary: secondaryColor,
-        accent: accentColor,
-      },
-    });
-
-    if (!profile) {
-      toast({
-        title: "Error",
-        description: "Failed to create voice profile. Please try again.",
-        variant: "destructive",
       });
-      return;
+
+      if (!profile) {
+        toast({
+          title: "Error",
+          description: "Failed to create voice profile. Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      toast({
+        title: "Voice Profile Created",
+        description: `"${profile.name}" is ready to use!`,
+      });
+
+      router.push("/dashboard");
+    } finally {
+      setIsSaving(false);
     }
-
-    toast({
-      title: "Voice Profile Created",
-      description: `"${profile.name}" is ready to use!`,
-    });
-
-    router.push("/dashboard");
   };
 
   const togglePlatform = (platform: "linkedin" | "twitter") => {
@@ -597,10 +605,19 @@ export default function NewVoiceProfilePage() {
               <ChevronRight className="w-4 h-4 ml-2" />
             </Button>
           ) : (
-            <Button onClick={handleSave}>
-              <Sparkles className="w-4 h-4 mr-2" />
-              Create Profile
-              <Check className="w-4 h-4 ml-2" />
+            <Button onClick={handleSave} disabled={isSaving}>
+              {isSaving ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 mr-2" />
+                  Create Profile
+                  <Check className="w-4 h-4 ml-2" />
+                </>
+              )}
             </Button>
           )}
         </div>

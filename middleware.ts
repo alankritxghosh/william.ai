@@ -1,13 +1,10 @@
 /**
- * Next.js Proxy (formerly Middleware) for Supabase Authentication
+ * Next.js Middleware for Supabase Authentication
  * 
- * This proxy runs on every request to:
+ * This middleware runs on every request to:
  * 1. Refresh the auth session (keeps user logged in)
  * 2. Protect routes that require authentication
  * 3. Redirect unauthenticated users to login
- * 
- * Note: In Next.js 16+, middleware.ts is renamed to proxy.ts
- * and the export is renamed from `middleware` to `proxy`
  * 
  * SECURITY NOTES:
  * - Runs on EVERY matched request (zero trust)
@@ -25,10 +22,10 @@ import {
   createUnauthorizedResponse,
 } from "@/lib/supabase/middleware";
 
-async function proxyHandler(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Skip proxy for static files and Next.js internals
+  // Skip middleware for static files and Next.js internals
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
@@ -64,17 +61,10 @@ async function proxyHandler(request: NextRequest) {
   return response;
 }
 
-// Export as `proxy` for Next.js 16+
-export const proxy = proxyHandler;
-
-// Also export as default and middleware for compatibility
-export const middleware = proxyHandler;
-export default proxyHandler;
-
 /**
- * Proxy matcher configuration
+ * Middleware matcher configuration
  * 
- * This defines which routes the proxy runs on.
+ * This defines which routes the middleware runs on.
  * Excludes static files and public assets for performance.
  */
 export const config = {

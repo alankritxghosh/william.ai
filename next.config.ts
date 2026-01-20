@@ -48,7 +48,8 @@ const securityHeaders = [
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
           "font-src 'self' https://fonts.gstatic.com",
           "img-src 'self' data: blob: https:",
-          "connect-src 'self' https://generativelanguage.googleapis.com https://vercel.live https://va.vercel-scripts.com wss://ws-us3.pusher.com",
+          // Allow connections to Supabase and Gemini APIs
+          "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://generativelanguage.googleapis.com https://vercel.live https://va.vercel-scripts.com wss://ws-us3.pusher.com",
           "frame-ancestors 'none'",
           "form-action 'self'",
           "base-uri 'self'",
@@ -61,7 +62,8 @@ const securityHeaders = [
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
           "font-src 'self' https://fonts.gstatic.com",
           "img-src 'self' data: blob: https:",
-          "connect-src 'self' https://generativelanguage.googleapis.com https://vercel.live https://va.vercel-scripts.com wss://ws-us3.pusher.com ws://localhost:* http://localhost:*",
+          // Allow connections to Supabase, Gemini, and localhost for development
+          "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://generativelanguage.googleapis.com https://vercel.live https://va.vercel-scripts.com wss://ws-us3.pusher.com ws://localhost:* http://localhost:*",
           "frame-ancestors 'none'",
           "form-action 'self'",
           "base-uri 'self'",

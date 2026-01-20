@@ -123,7 +123,7 @@ export default function NewVoiceProfilePage() {
     setCurrentStep(prev => Math.max(prev - 1, 1));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     let topPosts;
     
     if (useReferenceCreator) {
@@ -146,7 +146,7 @@ export default function NewVoiceProfilePage() {
         }));
     }
 
-    const profile = createProfile({
+    const profile = await createProfile({
       name,
       rules: {
         sentencePatterns: parseToArray(sentencePatterns),
@@ -172,6 +172,15 @@ export default function NewVoiceProfilePage() {
         accent: accentColor,
       },
     });
+
+    if (!profile) {
+      toast({
+        title: "Error",
+        description: "Failed to create voice profile. Please try again.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     toast({
       title: "Voice Profile Created",

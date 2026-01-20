@@ -40,7 +40,7 @@ export async function updateSession(request: NextRequest) {
     // If Supabase isn't configured, let the request through
     // The app will show appropriate errors
     console.warn("Supabase environment variables not configured");
-    return response;
+    return { response, user: null, supabase: null as any };
   }
 
   const supabase = createServerClient<Database>(supabaseUrl, supabaseAnonKey, {

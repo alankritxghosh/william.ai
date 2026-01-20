@@ -80,9 +80,8 @@ export async function createClient() {
  * 
  * This client can read and write cookies, suitable for auth operations.
  * 
- * Usage:
- * ```tsx
- * // In an API route (app/api/*/route.ts)
+ * Usage in an API route (app/api/[endpoint]/route.ts):
+ * 
  * import { createRouteHandlerClient } from '@/lib/supabase/server';
  * 
  * export async function POST(request: Request) {
@@ -91,9 +90,7 @@ export async function createClient() {
  *   if (!user) {
  *     return Response.json({ error: 'Unauthorized' }, { status: 401 });
  *   }
- *   // ...
  * }
- * ```
  */
 export async function createRouteHandlerClient() {
   const { supabaseUrl, supabaseAnonKey } = getSupabaseConfig();
@@ -148,15 +145,16 @@ export function createAdminClient() {
 
   // Import createClient from @supabase/supabase-js for service role
   // (doesn't need cookie handling as it bypasses auth)
-  const { createClient } = require("@supabase/supabase-js");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createClient: createSupabaseClient } = require("@supabase/supabase-js");
 
-  return createClient<Database>(supabaseUrl, supabaseServiceKey, {
+  return createSupabaseClient(supabaseUrl, supabaseServiceKey, {
     auth: {
       // Disable auto-refresh for service role
       autoRefreshToken: false,
       persistSession: false,
     },
-  });
+  }) as ReturnType<typeof createServerClient<Database>>;
 }
 
 /**

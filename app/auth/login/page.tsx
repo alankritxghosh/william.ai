@@ -1,16 +1,38 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useState, Suspense, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
 import { Sparkles, Mail, Lock, Github, AlertCircle, Loader2 } from "lucide-react";
+
+/**
+ * Safely get Supabase client (returns null if not configured)
+ */
+function getSupabaseClient() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return null;
+  }
+  
+  try {
+    const { createBrowserClient } = require("@supabase/ssr");
+    return createBrowserClient(supabaseUrl, supabaseAnonKey);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Login Form Component
@@ -32,14 +54,32 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isOAuthLoading, setIsOAuthLoading] = useState<string | null>(null);
+  const [supabase, setSupabase] = useState<any>(null);
+  const initRef = useRef(false);
 
-  const supabase = createClient();
+  // Initialize Supabase client on mount
+  useEffect(() => {
+    if (!initRef.current) {
+      initRef.current = true;
+      const client = getSupabaseClient();
+      setSupabase(client);
+    }
+  }, []);
 
   /**
    * Handle email/password sign in
    */
   const handleEmailSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!supabase) {
+      toast({
+        title: "Error",
+        description: "Authentication not configured. Please contact support.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setIsLoading(true);
 
     try {
@@ -90,6 +130,15 @@ function LoginForm() {
       return;
     }
 
+    if (!supabase) {
+      toast({
+        title: "Error",
+        description: "Authentication not configured. Please contact support.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsLoading(true);
 
     try {
@@ -128,6 +177,15 @@ function LoginForm() {
    * Handle OAuth sign in (Google, GitHub)
    */
   const handleOAuthSignIn = async (provider: "google" | "github") => {
+    if (!supabase) {
+      toast({
+        title: "Error",
+        description: "Authentication not configured. Please contact support.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setIsOAuthLoading(provider);
 
     try {

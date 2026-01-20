@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { VoiceProfile } from "@/lib/types";
 import { 
   loadVoiceProfiles as loadFromLocalStorage, 
@@ -9,7 +9,6 @@ import {
   setActiveProfileId,
   generateId 
 } from "@/lib/utils/storage";
-import { createClient } from "@/lib/supabase/client";
 import {
   fetchVoiceProfiles,
   createVoiceProfile as createProfileInDb,
@@ -35,6 +34,30 @@ export interface VoiceProfileContextType {
 
 const VoiceProfileContext = createContext<VoiceProfileContextType | null>(null);
 
+/**
+ * Safely get Supabase client (returns null if not configured)
+ */
+function getSupabaseClient() {
+  if (typeof window === 'undefined') {
+    return null; // SSR - no client
+  }
+  
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return null;
+  }
+  
+  try {
+    // Dynamic import to avoid issues during build
+    const { createBrowserClient } = require("@supabase/ssr");
+    return createBrowserClient(supabaseUrl, supabaseAnonKey);
+  } catch {
+    return null;
+  }
+}
+
 export function VoiceProfileProvider({ children }: { children: React.ReactNode }) {
   const [profiles, setProfiles] = useState<VoiceProfile[]>([]);
   const [activeProfile, setActiveProfileState] = useState<VoiceProfile | null>(null);
@@ -42,8 +65,17 @@ export function VoiceProfileProvider({ children }: { children: React.ReactNode }
   const [error, setError] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const [supabaseClient, setSupabaseClient] = useState<any>(null);
+  const initRef = useRef(false);
 
-  const supabase = createClient();
+  // Initialize Supabase client on mount (client-side only)
+  useEffect(() => {
+    if (!initRef.current) {
+      initRef.current = true;
+      const client = getSupabaseClient();
+      setSupabaseClient(client);
+    }
+  }, []);
 
   /**
    * Load profiles from Supabase or localStorage
@@ -53,31 +85,39 @@ export function VoiceProfileProvider({ children }: { children: React.ReactNode }
     setError(null);
 
     try {
-      // Check if user is authenticated
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (user) {
-        setIsAuthenticated(true);
-        setUserId(user.id);
-
-        // Fetch from Supabase
-        const { data, error: fetchError } = await fetchVoiceProfiles();
+      if (supabaseClient) {
+        // Check if user is authenticated
+        const { data: { user } } = await supabaseClient.auth.getUser();
         
-        if (fetchError) {
-          console.error("[VoiceProfile] Supabase fetch error:", fetchError);
-          // Fall back to localStorage
+        if (user) {
+          setIsAuthenticated(true);
+          setUserId(user.id);
+
+          // Fetch from Supabase
+          const { data, error: fetchError } = await fetchVoiceProfiles();
+          
+          if (fetchError) {
+            console.error("[VoiceProfile] Supabase fetch error:", fetchError);
+            // Fall back to localStorage
+            const localProfiles = loadFromLocalStorage();
+            setProfiles(localProfiles);
+            setError("Using offline data. Changes may not sync.");
+          } else {
+            setProfiles(data);
+            // Also update localStorage as cache
+            saveToLocalStorage(data);
+          }
+        } else {
+          setIsAuthenticated(false);
+          setUserId(null);
+          // Not authenticated - use localStorage only
           const localProfiles = loadFromLocalStorage();
           setProfiles(localProfiles);
-          setError("Using offline data. Changes may not sync.");
-        } else {
-          setProfiles(data);
-          // Also update localStorage as cache
-          saveToLocalStorage(data);
         }
       } else {
+        // No Supabase client - use localStorage only
         setIsAuthenticated(false);
         setUserId(null);
-        // Not authenticated - use localStorage only
         const localProfiles = loadFromLocalStorage();
         setProfiles(localProfiles);
       }
@@ -85,10 +125,14 @@ export function VoiceProfileProvider({ children }: { children: React.ReactNode }
       // Restore active profile
       const activeId = getActiveProfileId();
       if (activeId) {
-        const active = profiles.find(p => p.id === activeId);
-        if (active) {
-          setActiveProfileState(active);
-        }
+        // We need to use the current profiles, not stale closure
+        setProfiles(currentProfiles => {
+          const active = currentProfiles.find(p => p.id === activeId);
+          if (active) {
+            setActiveProfileState(active);
+          }
+          return currentProfiles;
+        });
       }
     } catch (err) {
       console.error("[VoiceProfile] Load error:", err);
@@ -99,17 +143,19 @@ export function VoiceProfileProvider({ children }: { children: React.ReactNode }
     } finally {
       setIsLoading(false);
     }
-  }, [supabase]);
+  }, [supabaseClient]);
 
-  // Load profiles on mount
+  // Load profiles when Supabase client is ready
   useEffect(() => {
     loadProfiles();
   }, [loadProfiles]);
 
   // Listen for auth state changes
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event) => {
+    if (!supabaseClient) return;
+
+    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange(
+      async (event: string) => {
         if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
           await loadProfiles();
         }
@@ -119,7 +165,7 @@ export function VoiceProfileProvider({ children }: { children: React.ReactNode }
     return () => {
       subscription.unsubscribe();
     };
-  }, [supabase, loadProfiles]);
+  }, [supabaseClient, loadProfiles]);
 
   // Update active profile when profiles change
   useEffect(() => {
@@ -156,8 +202,11 @@ export function VoiceProfileProvider({ children }: { children: React.ReactNode }
         return null;
       }
 
-      setProfiles(prev => [...prev, data]);
-      saveToLocalStorage([...profiles, data]); // Update cache
+      setProfiles(prev => {
+        const updated = [...prev, data];
+        saveToLocalStorage(updated);
+        return updated;
+      });
       return data;
     } else {
       // Create locally
@@ -176,7 +225,7 @@ export function VoiceProfileProvider({ children }: { children: React.ReactNode }
       });
       return newProfile;
     }
-  }, [isAuthenticated, profiles]);
+  }, [isAuthenticated]);
 
   /**
    * Update a voice profile
@@ -185,21 +234,25 @@ export function VoiceProfileProvider({ children }: { children: React.ReactNode }
     setError(null);
 
     // Optimistic update
-    setProfiles(prev => prev.map(p => {
-      if (p.id === id) {
-        const updated = {
-          ...p,
-          ...updates,
-          updatedAt: new Date().toISOString(),
-        };
-        // Update active profile if it's the one being updated
-        if (activeProfile?.id === id) {
-          setActiveProfileState(updated);
+    setProfiles(prev => {
+      const updated = prev.map(p => {
+        if (p.id === id) {
+          const updatedProfile = {
+            ...p,
+            ...updates,
+            updatedAt: new Date().toISOString(),
+          };
+          // Update active profile if it's the one being updated
+          if (activeProfile?.id === id) {
+            setActiveProfileState(updatedProfile);
+          }
+          return updatedProfile;
         }
-        return updated;
-      }
-      return p;
-    }));
+        return p;
+      });
+      saveToLocalStorage(updated);
+      return updated;
+    });
 
     if (isAuthenticated) {
       // Update in Supabase
@@ -208,13 +261,9 @@ export function VoiceProfileProvider({ children }: { children: React.ReactNode }
       if (updateError) {
         console.error("[VoiceProfile] Update error:", updateError);
         setError("Failed to save changes. Will retry.");
-        // Revert would require storing previous state - for now, just log
       }
     }
-
-    // Update localStorage cache
-    saveToLocalStorage(profiles);
-  }, [isAuthenticated, profiles, activeProfile]);
+  }, [isAuthenticated, activeProfile]);
 
   /**
    * Delete a voice profile
@@ -223,7 +272,12 @@ export function VoiceProfileProvider({ children }: { children: React.ReactNode }
     setError(null);
 
     // Optimistic update
-    setProfiles(prev => prev.filter(p => p.id !== id));
+    setProfiles(prev => {
+      const updated = prev.filter(p => p.id !== id);
+      saveToLocalStorage(updated);
+      return updated;
+    });
+    
     if (activeProfile?.id === id) {
       setActiveProfile(null);
     }
@@ -235,13 +289,9 @@ export function VoiceProfileProvider({ children }: { children: React.ReactNode }
       if (deleteError) {
         console.error("[VoiceProfile] Delete error:", deleteError);
         setError("Failed to delete profile");
-        // Could revert, but profile is already removed from UI
       }
     }
-
-    // Update localStorage cache
-    saveToLocalStorage(profiles.filter(p => p.id !== id));
-  }, [isAuthenticated, profiles, activeProfile, setActiveProfile]);
+  }, [isAuthenticated, activeProfile, setActiveProfile]);
 
   /**
    * Refresh profiles from server

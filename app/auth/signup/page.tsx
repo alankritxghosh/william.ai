@@ -1,16 +1,38 @@
 "use client";
 
-import { useState, Suspense, useMemo } from "react";
+import { useState, Suspense, useMemo, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
 import { Sparkles, Mail, Lock, User, Github, AlertCircle, Loader2, Check, X } from "lucide-react";
+
+/**
+ * Safely get Supabase client (returns null if not configured)
+ */
+function getSupabaseClient() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return null;
+  }
+  
+  try {
+    const { createBrowserClient } = require("@supabase/ssr");
+    return createBrowserClient(supabaseUrl, supabaseAnonKey);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Password strength requirements
@@ -55,8 +77,17 @@ function SignupForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [isOAuthLoading, setIsOAuthLoading] = useState<string | null>(null);
   const [showPasswordRequirements, setShowPasswordRequirements] = useState(false);
+  const [supabase, setSupabase] = useState<any>(null);
+  const initRef = useRef(false);
 
-  const supabase = createClient();
+  // Initialize Supabase client on mount
+  useEffect(() => {
+    if (!initRef.current) {
+      initRef.current = true;
+      const client = getSupabaseClient();
+      setSupabase(client);
+    }
+  }, []);
 
   // Check password strength
   const passwordStrength = useMemo(() => {
@@ -90,6 +121,15 @@ function SignupForm() {
       toast({
         title: "Passwords Don't Match",
         description: "Please make sure your passwords match.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!supabase) {
+      toast({
+        title: "Error",
+        description: "Authentication not configured. Please contact support.",
         variant: "destructive",
       });
       return;
@@ -139,6 +179,15 @@ function SignupForm() {
    * Handle OAuth sign up (Google, GitHub)
    */
   const handleOAuthSignUp = async (provider: "google" | "github") => {
+    if (!supabase) {
+      toast({
+        title: "Error",
+        description: "Authentication not configured. Please contact support.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsOAuthLoading(provider);
 
     try {

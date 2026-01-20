@@ -44,19 +44,21 @@ export default function VoiceProfileListPage() {
     setOpenMenuId(null);
   };
 
-  const handleDuplicate = (profile: VoiceProfile) => {
-    const duplicated = createProfile({
+  const handleDuplicate = async (profile: VoiceProfile) => {
+    const duplicated = await createProfile({
       name: `${profile.name} (Copy)`,
       rules: { ...profile.rules },
       topPosts: [...profile.topPosts],
       brandColors: { ...profile.brandColors },
     });
     setOpenMenuId(null);
-    router.push(`/voice-profile/${duplicated.id}`);
+    if (duplicated) {
+      router.push(`/voice-profile/${duplicated.id}`);
+    }
   };
 
-  const handleDelete = (id: string) => {
-    deleteProfile(id);
+  const handleDelete = async (id: string) => {
+    await deleteProfile(id);
     setDeleteConfirmId(null);
   };
 

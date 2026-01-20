@@ -11,9 +11,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Menu, X, Sparkles, User, LogOut, Settings, Loader2 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 const navItems = [
@@ -22,6 +21,29 @@ const navItems = [
   { href: "/voice-profile/new", label: "Voice Profile" },
 ];
 
+/**
+ * Safely get Supabase client (returns null if not configured)
+ */
+function getSupabaseClient() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return null;
+  }
+  
+  try {
+    const { createBrowserClient } = require("@supabase/ssr");
+    return createBrowserClient(supabaseUrl, supabaseAnonKey);
+  } catch {
+    return null;
+  }
+}
+
 export function Navigation() {
   const pathname = usePathname();
   const router = useRouter();
@@ -29,14 +51,28 @@ export function Navigation() {
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [supabaseClient, setSupabaseClient] = useState<any>(null);
+  const initRef = useRef(false);
 
-  const supabase = createClient();
-
-  // Check auth state on mount and subscribe to changes
+  // Initialize Supabase client on mount
   useEffect(() => {
+    if (!initRef.current) {
+      initRef.current = true;
+      const client = getSupabaseClient();
+      setSupabaseClient(client);
+      if (!client) {
+        setIsLoading(false);
+      }
+    }
+  }, []);
+
+  // Check auth state when Supabase client is ready
+  useEffect(() => {
+    if (!supabaseClient) return;
+
     // Get initial session
     const getUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await supabaseClient.auth.getUser();
       setUser(user);
       setIsLoading(false);
     };
@@ -44,8 +80,8 @@ export function Navigation() {
     getUser();
 
     // Subscribe to auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange(
+      (event: string, session: any) => {
         setUser(session?.user ?? null);
         
         // Refresh the page on sign in/out to update server components
@@ -58,13 +94,15 @@ export function Navigation() {
     return () => {
       subscription.unsubscribe();
     };
-  }, [supabase, router]);
+  }, [supabaseClient, router]);
 
   // Handle sign out
   const handleSignOut = async () => {
+    if (!supabaseClient) return;
+    
     setIsSigningOut(true);
     try {
-      await supabase.auth.signOut();
+      await supabaseClient.auth.signOut();
       router.push("/");
       router.refresh();
     } catch (error) {

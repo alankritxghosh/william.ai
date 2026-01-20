@@ -1,9 +1,8 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { GeneratedPost } from "@/lib/types";
 import { loadPosts as loadFromLocalStorage, savePosts as saveToLocalStorage } from "@/lib/utils/storage";
-import { createClient } from "@/lib/supabase/client";
 import {
   fetchGeneratedPosts,
   createGeneratedPost as createPostInDb,
@@ -28,14 +27,48 @@ export interface PostContextType {
 
 const PostContext = createContext<PostContextType | null>(null);
 
+/**
+ * Safely get Supabase client (returns null if not configured)
+ */
+function getSupabaseClient() {
+  if (typeof window === 'undefined') {
+    return null; // SSR - no client
+  }
+  
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return null;
+  }
+  
+  try {
+    // Dynamic import to avoid issues during build
+    const { createBrowserClient } = require("@supabase/ssr");
+    return createBrowserClient(supabaseUrl, supabaseAnonKey);
+  } catch {
+    return null;
+  }
+}
+
 export function PostProvider({ children }: { children: React.ReactNode }) {
   const [posts, setPosts] = useState<GeneratedPost[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [supabaseClient, setSupabaseClient] = useState<any>(null);
+  const initRef = useRef(false);
 
-  const supabase = createClient();
   const { profiles, isLoading: profilesLoading } = useVoiceProfiles();
+
+  // Initialize Supabase client on mount (client-side only)
+  useEffect(() => {
+    if (!initRef.current) {
+      initRef.current = true;
+      const client = getSupabaseClient();
+      setSupabaseClient(client);
+    }
+  }, []);
 
   /**
    * Load posts from Supabase or localStorage
@@ -48,29 +81,36 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
     setError(null);
 
     try {
-      // Check if user is authenticated
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (user) {
-        setIsAuthenticated(true);
-
-        // Fetch from Supabase
-        const { data, error: fetchError } = await fetchGeneratedPosts(profiles);
+      if (supabaseClient) {
+        // Check if user is authenticated
+        const { data: { user } } = await supabaseClient.auth.getUser();
         
-        if (fetchError) {
-          console.error("[PostContext] Supabase fetch error:", fetchError);
-          // Fall back to localStorage
+        if (user) {
+          setIsAuthenticated(true);
+
+          // Fetch from Supabase
+          const { data, error: fetchError } = await fetchGeneratedPosts(profiles);
+          
+          if (fetchError) {
+            console.error("[PostContext] Supabase fetch error:", fetchError);
+            // Fall back to localStorage
+            const localPosts = loadFromLocalStorage();
+            setPosts(localPosts);
+            setError("Using offline data. Changes may not sync.");
+          } else {
+            setPosts(data);
+            // Also update localStorage as cache
+            saveToLocalStorage(data);
+          }
+        } else {
+          setIsAuthenticated(false);
+          // Not authenticated - use localStorage only
           const localPosts = loadFromLocalStorage();
           setPosts(localPosts);
-          setError("Using offline data. Changes may not sync.");
-        } else {
-          setPosts(data);
-          // Also update localStorage as cache
-          saveToLocalStorage(data);
         }
       } else {
+        // No Supabase client - use localStorage only
         setIsAuthenticated(false);
-        // Not authenticated - use localStorage only
         const localPosts = loadFromLocalStorage();
         setPosts(localPosts);
       }
@@ -83,9 +123,9 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [supabase, profiles, profilesLoading]);
+  }, [supabaseClient, profiles, profilesLoading]);
 
-  // Load posts when profiles are ready
+  // Load posts when profiles are ready and Supabase client is initialized
   useEffect(() => {
     if (!profilesLoading) {
       loadPosts();
@@ -94,8 +134,10 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
 
   // Listen for auth state changes
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event) => {
+    if (!supabaseClient) return;
+
+    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange(
+      async (event: string) => {
         if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
           await loadPosts();
         }
@@ -105,7 +147,7 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
     return () => {
       subscription.unsubscribe();
     };
-  }, [supabase, loadPosts]);
+  }, [supabaseClient, loadPosts]);
 
   /**
    * Add a new post
@@ -114,7 +156,11 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
     setError(null);
 
     // Optimistic update
-    setPosts(prev => [...prev, post]);
+    setPosts(prev => {
+      const updated = [...prev, post];
+      saveToLocalStorage(updated);
+      return updated;
+    });
 
     if (isAuthenticated) {
       // Create in Supabase
@@ -123,13 +169,9 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
       if (createError) {
         console.error("[PostContext] Create error:", createError);
         setError("Failed to save post. Will retry.");
-        // Post is already in UI, it will be saved to localStorage
       }
     }
-
-    // Update localStorage cache
-    saveToLocalStorage([...posts, post]);
-  }, [isAuthenticated, posts]);
+  }, [isAuthenticated]);
 
   /**
    * Update a post
@@ -138,16 +180,20 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
     setError(null);
 
     // Optimistic update
-    setPosts(prev => prev.map(p => {
-      if (p.id === id) {
-        return {
-          ...p,
-          ...updates,
-          updatedAt: new Date().toISOString(),
-        };
-      }
-      return p;
-    }));
+    setPosts(prev => {
+      const updated = prev.map(p => {
+        if (p.id === id) {
+          return {
+            ...p,
+            ...updates,
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return p;
+      });
+      saveToLocalStorage(updated);
+      return updated;
+    });
 
     if (isAuthenticated) {
       // Update in Supabase (only status fields are updatable)
@@ -163,13 +209,7 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
         setError("Failed to save changes.");
       }
     }
-
-    // Update localStorage cache
-    const updatedPosts = posts.map(p => 
-      p.id === id ? { ...p, ...updates, updatedAt: new Date().toISOString() } : p
-    );
-    saveToLocalStorage(updatedPosts);
-  }, [isAuthenticated, posts]);
+  }, [isAuthenticated]);
 
   /**
    * Delete a post
@@ -178,7 +218,11 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
     setError(null);
 
     // Optimistic update
-    setPosts(prev => prev.filter(p => p.id !== id));
+    setPosts(prev => {
+      const updated = prev.filter(p => p.id !== id);
+      saveToLocalStorage(updated);
+      return updated;
+    });
 
     if (isAuthenticated) {
       // Delete from Supabase
@@ -189,10 +233,7 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
         setError("Failed to delete post.");
       }
     }
-
-    // Update localStorage cache
-    saveToLocalStorage(posts.filter(p => p.id !== id));
-  }, [isAuthenticated, posts]);
+  }, [isAuthenticated]);
 
   /**
    * Get posts by voice profile ID

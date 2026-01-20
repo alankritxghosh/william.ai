@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,13 +28,16 @@ import {
 export default function DashboardPage() {
   const { profiles, activeProfile, setActiveProfile } = useVoiceProfiles();
   const { posts, getPostsByProfile, deletePost } = usePosts();
+  
+  // Separate filter state for viewing posts (doesn't affect activeProfile for creation)
+  const [filterProfileId, setFilterProfileId] = useState<string>("all");
 
   const filteredPosts = useMemo(() => {
-    if (activeProfile) {
-      return getPostsByProfile(activeProfile.id);
+    if (filterProfileId !== "all") {
+      return getPostsByProfile(filterProfileId);
     }
     return posts;
-  }, [activeProfile, posts, getPostsByProfile]);
+  }, [filterProfileId, posts, getPostsByProfile]);
 
   const sortedPosts = useMemo(() => {
     return [...filteredPosts].sort(
@@ -63,14 +66,14 @@ export default function DashboardPage() {
     return { totalPosts, avgScore, thisMonth, timeSavedHours };
   }, [filteredPosts]);
 
-  const handleProfileChange = (profileId: string) => {
-    if (profileId === "all") {
-      setActiveProfile(null);
-    } else {
-      const profile = profiles.find(p => p.id === profileId);
-      if (profile) {
-        setActiveProfile(profile);
-      }
+  const handleFilterChange = (profileId: string) => {
+    setFilterProfileId(profileId);
+  };
+
+  const handleActiveProfileChange = (profileId: string) => {
+    const profile = profiles.find(p => p.id === profileId);
+    if (profile) {
+      setActiveProfile(profile);
     }
   };
 
@@ -119,24 +122,50 @@ export default function DashboardPage() {
             </p>
           </div>
           
-          {/* Profile Selector */}
+          {/* Profile Selectors */}
           <div className="flex items-center gap-4">
-            <Select
-              value={activeProfile?.id || "all"}
-              onValueChange={handleProfileChange}
-            >
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Select profile" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Profiles</SelectItem>
-                {profiles.map(profile => (
-                  <SelectItem key={profile.id} value={profile.id}>
-                    {profile.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/* Active Profile for Creating Posts */}
+            {profiles.length > 1 && (
+              <div className="flex flex-col">
+                <span className="text-xs text-muted-foreground mb-1">Creating as:</span>
+                <Select
+                  value={activeProfile?.id || profiles[0]?.id}
+                  onValueChange={handleActiveProfileChange}
+                >
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Select profile" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {profiles.map(profile => (
+                      <SelectItem key={profile.id} value={profile.id}>
+                        {profile.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            
+            {/* Filter for Viewing Posts */}
+            <div className="flex flex-col">
+              <span className="text-xs text-muted-foreground mb-1">Viewing:</span>
+              <Select
+                value={filterProfileId}
+                onValueChange={handleFilterChange}
+              >
+                <SelectTrigger className="w-[160px]">
+                  <SelectValue placeholder="Filter posts" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Profiles</SelectItem>
+                  {profiles.map(profile => (
+                    <SelectItem key={profile.id} value={profile.id}>
+                      {profile.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
 

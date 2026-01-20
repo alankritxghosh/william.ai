@@ -122,18 +122,7 @@ export function VoiceProfileProvider({ children }: { children: React.ReactNode }
         setProfiles(localProfiles);
       }
 
-      // Restore active profile
-      const activeId = getActiveProfileId();
-      if (activeId) {
-        // We need to use the current profiles, not stale closure
-        setProfiles(currentProfiles => {
-          const active = currentProfiles.find(p => p.id === activeId);
-          if (active) {
-            setActiveProfileState(active);
-          }
-          return currentProfiles;
-        });
-      }
+      // Note: Active profile restoration is handled by the useEffect that watches `profiles`
     } catch (err) {
       console.error("[VoiceProfile] Load error:", err);
       // Fall back to localStorage
@@ -169,11 +158,25 @@ export function VoiceProfileProvider({ children }: { children: React.ReactNode }
 
   // Update active profile when profiles change
   useEffect(() => {
+    if (profiles.length === 0) {
+      setActiveProfileState(null);
+      return;
+    }
+
     const activeId = getActiveProfileId();
     if (activeId) {
       const active = profiles.find(p => p.id === activeId);
-      setActiveProfileState(active || null);
+      if (active) {
+        setActiveProfileState(active);
+        return;
+      }
     }
+    
+    // If no valid active profile is set but profiles exist, auto-select the first one
+    // This ensures users always have an active profile when creating posts
+    const firstProfile = profiles[0];
+    setActiveProfileState(firstProfile);
+    setActiveProfileId(firstProfile.id);
   }, [profiles]);
 
   /**

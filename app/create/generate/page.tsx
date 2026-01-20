@@ -9,7 +9,7 @@ import { GenerationLoader } from "@/components/generation/GenerationLoader";
 import { PostPreview } from "@/components/generation/PostPreview";
 import { usePosts } from "@/lib/context/PostContext";
 import { InterviewResponse, VoiceProfile, GeneratedPost } from "@/lib/types";
-import { generatePost, PipelineProgress } from "@/lib/pipeline/multi-stage";
+import { PipelineProgress } from "@/lib/pipeline/multi-stage";
 import { toast } from "@/hooks/use-toast";
 import { AlertCircle, ArrowLeft, RefreshCw, Home } from "lucide-react";
 import Link from "next/link";
@@ -30,6 +30,42 @@ export default function GeneratePage() {
   const [error, setError] = useState<string | null>(null);
   const [interview, setInterview] = useState<InterviewResponse | null>(null);
   const [voiceProfile, setVoiceProfile] = useState<VoiceProfile | null>(null);
+
+  // Call the API to generate a post (keeps API key server-side)
+  const callGenerateAPI = async (
+    interviewData: InterviewResponse,
+    profileData: VoiceProfile
+  ): Promise<GeneratedPost> => {
+    const response = await fetch("/api/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        interview: interviewData,
+        voiceProfile: profileData,
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      // Handle specific error types
+      if (response.status === 401) {
+        throw new Error("Please sign in to generate posts.");
+      } else if (response.status === 429) {
+        throw new Error(result.error?.message || "Too many requests. Please try again later.");
+      } else {
+        throw new Error(result.error?.message || "Generation failed. Please try again.");
+      }
+    }
+
+    if (!result.success) {
+      throw new Error(result.error?.message || "Generation failed.");
+    }
+
+    return result.data as GeneratedPost;
+  };
 
   // Load data from session storage and start generation
   useEffect(() => {
@@ -54,16 +90,15 @@ export default function GeneratePage() {
         sessionStorage.removeItem("pendingInterview");
         sessionStorage.removeItem("pendingProfile");
 
-        // Start generation
+        // Start generation via API
         setState("generating");
+        setProgress({
+          stage: "generating",
+          percent: 50,
+          message: "Generating your post...",
+        });
         
-        const post = await generatePost(
-          loadedInterview,
-          loadedProfile,
-          (progressUpdate) => {
-            setProgress(progressUpdate);
-          }
-        );
+        const post = await callGenerateAPI(loadedInterview, loadedProfile);
 
         setGeneratedPost(post);
         addPost(post);
@@ -80,7 +115,7 @@ export default function GeneratePage() {
         
         toast({
           title: "Generation Failed",
-          description: "Please try again or check your API key",
+          description: err instanceof Error ? err.message : "Please try again",
           variant: "destructive",
         });
       }
@@ -94,16 +129,10 @@ export default function GeneratePage() {
     
     setState("generating");
     setError(null);
-    setProgress({ stage: "initial", percent: 0, message: "Retrying..." });
+    setProgress({ stage: "generating", percent: 50, message: "Retrying..." });
 
     try {
-      const post = await generatePost(
-        interview,
-        voiceProfile,
-        (progressUpdate) => {
-          setProgress(progressUpdate);
-        }
-      );
+      const post = await callGenerateAPI(interview, voiceProfile);
 
       setGeneratedPost(post);
       addPost(post);

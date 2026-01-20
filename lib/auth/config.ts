@@ -20,32 +20,59 @@ interface StoredUser {
   id: string;
   email: string;
   name: string;
-  password: string; // In production, this should be hashed with bcrypt
+  password: string;
   image?: string;
   createdAt: string;
 }
 
-// Demo users - ONLY available in development mode
-// In production, these are disabled and you must use OAuth or implement proper database auth
-const demoUsers: StoredUser[] = process.env.NODE_ENV === "development" 
+/**
+ * DEMO MODE CONFIGURATION
+ * 
+ * SECURITY WARNING:
+ * Demo mode should ONLY be enabled for local development or controlled demos.
+ * Demo credentials use plaintext passwords and are NOT secure for production.
+ * 
+ * To enable demo mode:
+ * 1. Set NODE_ENV=development
+ * 2. Set ENABLE_DEMO_AUTH=true in your .env.local
+ * 
+ * In production, you MUST use OAuth providers (Google, GitHub) or
+ * implement proper database authentication with hashed passwords.
+ */
+const isDemoModeEnabled = 
+  process.env.NODE_ENV === "development" && 
+  process.env.ENABLE_DEMO_AUTH === "true";
+
+// Demo users - ONLY available when explicitly enabled in development
+const demoUsers: StoredUser[] = isDemoModeEnabled
   ? [
       {
         id: "demo-user-1",
         email: "demo@william.ai",
         name: "Demo User",
-        password: "demo123", // Only for development testing
+        password: "demo123",
         createdAt: new Date().toISOString(),
       },
     ]
   : [];
 
-// Log warning if credentials auth is used in production without OAuth
+// Log demo mode status
+if (isDemoModeEnabled) {
+  console.warn(
+    "⚠️ DEMO AUTH ENABLED: Using insecure demo credentials.\n" +
+    "This should ONLY be used for local development.\n" +
+    "Demo user: demo@william.ai / demo123"
+  );
+}
+
+// Log warning if no OAuth providers configured in production
 if (process.env.NODE_ENV === "production" && 
     !process.env.GOOGLE_CLIENT_ID && 
     !process.env.GITHUB_ID) {
-  console.warn(
-    "⚠️ WARNING: No OAuth providers configured in production.\n" +
-    "Demo credentials are disabled in production for security.\n" +
+  console.error(
+    "🚨 CRITICAL: No OAuth providers configured in production!\n" +
+    "Demo credentials are DISABLED in production for security.\n" +
+    "Users will NOT be able to authenticate.\n" +
     "Please configure GOOGLE_CLIENT_ID/SECRET or GITHUB_ID/SECRET."
   );
 }
@@ -75,7 +102,16 @@ providers.push(
 
       const { email, password } = parsed.data;
 
-      // Find user (in production, query database)
+      // In production without demo mode, credentials auth is disabled
+      if (!isDemoModeEnabled) {
+        console.warn(
+          "[Auth] Credentials login attempted but demo mode is disabled. " +
+          "Use OAuth providers instead."
+        );
+        return null;
+      }
+
+      // Find user in demo users list
       const user = demoUsers.find(
         (u) => u.email === email && u.password === password
       );
@@ -83,6 +119,9 @@ providers.push(
       if (!user) {
         return null;
       }
+
+      // Log demo login for audit trail
+      console.warn(`[Auth] Demo user login: ${user.email}`);
 
       return {
         id: user.id,

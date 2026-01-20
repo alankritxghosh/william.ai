@@ -23,7 +23,7 @@ if (!GEMINI_API_KEY && typeof window === "undefined") {
 // Default timeout for API calls (30 seconds)
 const DEFAULT_TIMEOUT_MS = 30000;
 
-// Cost tracking - Gemini 2.0 Flash pricing (per 1K tokens)
+// Cost tracking - Gemini 3.0 Flash pricing (per 1K tokens)
 const COST_PER_1K_TOKENS = {
   prompt: 0.00025,
   completion: 0.001,
@@ -128,9 +128,9 @@ const safetySettings = [
 // Initialize Gemini AI (API key is server-side only, never exposed to client)
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY || "");
 
-// Get the Gemini 2.0 Flash model with safety settings
+// Get the Gemini 3 Flash model with safety settings
 export const gemini: GenerativeModel = genAI.getGenerativeModel({ 
-  model: "gemini-2.0-flash",
+  model: "gemini-3.0-flash",
   generationConfig: {
     temperature: 0.7,
     maxOutputTokens: 4096,

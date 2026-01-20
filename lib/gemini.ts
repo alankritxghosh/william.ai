@@ -13,17 +13,18 @@ import { enqueue, getQueueStats, isQueueHealthy } from "@/lib/utils/request-queu
 // Validate API key is configured (server-side only)
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
+// Fail fast if API key is missing (server-side only)
 if (!GEMINI_API_KEY && typeof window === "undefined") {
-  console.warn(
-    "⚠️ GEMINI_API_KEY is not configured. AI generation features will not work.\n" +
-    "Please add GEMINI_API_KEY to your .env.local file."
+  throw new Error(
+    "GEMINI_API_KEY is not configured. " +
+    "Please add it to your .env.local file."
   );
 }
 
 // Default timeout for API calls (30 seconds)
 const DEFAULT_TIMEOUT_MS = 30000;
 
-// Cost tracking - Gemini 3.0 Flash pricing (per 1K tokens)
+// Cost tracking - Gemini 2.5 Flash pricing (per 1K tokens)
 const COST_PER_1K_TOKENS = {
   prompt: 0.00025,
   completion: 0.001,
@@ -126,11 +127,11 @@ const safetySettings = [
 // ==========================================
 
 // Initialize Gemini AI (API key is server-side only, never exposed to client)
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY || "");
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY!);
 
-// Get the Gemini 3 Flash model with safety settings
+// Get the Gemini 2.5 Flash model with safety settings
 export const gemini: GenerativeModel = genAI.getGenerativeModel({ 
-  model: "gemini-3.0-flash",
+  model: "gemini-2.5-flash",
   generationConfig: {
     temperature: 0.7,
     maxOutputTokens: 4096,

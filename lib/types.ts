@@ -283,16 +283,23 @@ export interface APIResponse<T> {
 export interface VoiceProfileContextType {
   profiles: VoiceProfile[];
   activeProfile: VoiceProfile | null;
+  isLoading: boolean;
+  error: string | null;
+  isAuthenticated: boolean;
   setActiveProfile: (profile: VoiceProfile | null) => void;
-  createProfile: (profile: Omit<VoiceProfile, 'id' | 'createdAt' | 'updatedAt'>) => VoiceProfile;
-  updateProfile: (id: string, updates: Partial<VoiceProfile>) => void;
-  deleteProfile: (id: string) => void;
+  createProfile: (profile: Omit<VoiceProfile, 'id' | 'createdAt' | 'updatedAt'>) => Promise<VoiceProfile | null>;
+  updateProfile: (id: string, updates: Partial<VoiceProfile>) => Promise<void>;
+  deleteProfile: (id: string) => Promise<void>;
+  refreshProfiles: () => Promise<void>;
 }
 
 export interface PostContextType {
   posts: GeneratedPost[];
-  addPost: (post: GeneratedPost) => void;
-  updatePost: (id: string, updates: Partial<GeneratedPost>) => void;
-  deletePost: (id: string) => void;
+  isLoading: boolean;
+  error: string | null;
+  addPost: (post: GeneratedPost) => Promise<void>;
+  updatePost: (id: string, updates: Partial<GeneratedPost>) => Promise<void>;
+  deletePost: (id: string) => Promise<void>;
   getPostsByProfile: (profileId: string) => GeneratedPost[];
+  refreshPosts: () => Promise<void>;
 }

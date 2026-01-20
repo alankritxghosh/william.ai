@@ -1,8 +1,27 @@
+/**
+ * Insight Extraction API Route
+ * 
+ * Analyzes user interview answers and extracts key insights.
+ * 
+ * SECURITY FEATURES:
+ * - Authentication required (double-checked with Supabase)
+ * - Per-user rate limiting
+ * - Request body size limit
+ * - Input validation with Zod
+ * - Prompt injection protection via sanitizer
+ * - Generic error messages
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import { generate } from "@/lib/gemini";
-import { withRateLimit } from "@/lib/utils/rate-limiter";
+import { checkRateLimit, createRateLimitHeaders } from "@/lib/utils/rate-limiter";
 import { extractInsightRequestSchema, validateRequest } from "@/lib/validation/schemas";
-import { sanitizeForPrompt, escapePromptContent, createSafePromptSection } from "@/lib/security/sanitizer";
+import { sanitizeForPrompt, escapePromptContent } from "@/lib/security/sanitizer";
+import { 
+  authenticateRequest, 
+  createErrorResponse,
+  getUserRateLimitKey,
+} from "@/lib/supabase/api-auth";
 
 // Maximum request body size (100KB)
 const MAX_BODY_SIZE = 100 * 1024;
@@ -33,50 +52,69 @@ function sanitizeAnswers(answers: Record<string, string>): Record<string, string
 }
 
 export async function POST(request: NextRequest) {
-  // Check rate limit first
-  const rateLimitResponse = await withRateLimit(request, "general");
-  if (rateLimitResponse) {
-    return rateLimitResponse;
+  // =========================================
+  // 1. AUTHENTICATION CHECK (Defense in Depth)
+  // Middleware already checks, but we verify again
+  // =========================================
+  const auth = await authenticateRequest();
+  if (!auth.success) {
+    return auth.response;
+  }
+  const { user } = auth;
+
+  // =========================================
+  // 2. RATE LIMIT CHECK (Per-User)
+  // =========================================
+  const userRateLimitKey = getUserRateLimitKey(user.id, "extract");
+  const rateLimitResult = await checkRateLimit(userRateLimitKey, "general");
+  
+  if (!rateLimitResult.success) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: {
+          message: "Too many requests. Please try again later.",
+          code: "RATE_LIMIT_EXCEEDED",
+          retryAfter: rateLimitResult.retryAfter,
+        },
+      },
+      {
+        status: 429,
+        headers: createRateLimitHeaders(rateLimitResult),
+      }
+    );
   }
 
   try {
-    // Check content length header if available
+    // =========================================
+    // 3. REQUEST SIZE CHECK
+    // =========================================
     const contentLength = request.headers.get("content-length");
     if (contentLength && parseInt(contentLength) > MAX_BODY_SIZE) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: {
-            message: "Request body too large",
-            code: "PAYLOAD_TOO_LARGE",
-          },
-        },
-        { status: 413 }
-      );
+      return createErrorResponse("Request body too large", "PAYLOAD_TOO_LARGE", 413);
     }
 
-    // Parse and validate request body
+    // =========================================
+    // 4. INPUT VALIDATION
+    // =========================================
     const body = await request.json();
     
     const validation = validateRequest(extractInsightRequestSchema, body);
     if (!validation.success) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: {
-            message: validation.error,
-            code: "VALIDATION_ERROR",
-          },
-        },
-        { status: 400 }
-      );
+      return createErrorResponse(validation.error, "VALIDATION_ERROR", 400);
     }
 
     const { answers, flowType } = validation.data;
     
-    // Sanitize all user-provided content to prevent prompt injection
+    // =========================================
+    // 5. SANITIZE USER INPUT
+    // Prevent prompt injection attacks
+    // =========================================
     const sanitizedAnswers = sanitizeAnswers(answers);
 
+    // =========================================
+    // 6. BUILD PROMPT
+    // =========================================
     let prompt: string;
 
     if (flowType === "experience") {
@@ -128,9 +166,14 @@ Respond in JSON format:
 }`;
     }
 
+    // =========================================
+    // 7. CALL AI
+    // =========================================
     const result = await generate(prompt);
     
-    // Parse JSON from response
+    // =========================================
+    // 8. PARSE RESPONSE
+    // =========================================
     let parsed;
     try {
       // Clean up response - remove markdown code blocks if present
@@ -149,23 +192,26 @@ Respond in JSON format:
       parsed = { insight: result };
     }
 
-    return NextResponse.json({
-      success: true,
-      insight: parsed,
-    });
-  } catch (error) {
-    console.error("Error extracting insight:", error);
-    
-    // Return generic error message to prevent information leakage
+    // =========================================
+    // 9. RETURN SUCCESS RESPONSE
+    // =========================================
     return NextResponse.json(
       {
-        success: false,
-        error: {
-          message: "Failed to extract insight. Please try again.",
-          code: "EXTRACTION_ERROR",
-        },
+        success: true,
+        insight: parsed,
       },
-      { status: 500 }
+      {
+        headers: createRateLimitHeaders(rateLimitResult),
+      }
+    );
+  } catch (error) {
+    // SECURITY: Log error server-side, return generic message to client
+    console.error("[Extract Insight] Error:", error);
+    
+    return createErrorResponse(
+      "Failed to extract insight. Please try again.",
+      "EXTRACTION_ERROR",
+      500
     );
   }
 }

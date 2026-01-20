@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useSession, signOut } from "next-auth/react";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,8 +11,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useState } from "react";
-import { Menu, X, Sparkles, User, LogOut, Settings } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Menu, X, Sparkles, User, LogOut, Settings, Loader2 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard" },
@@ -23,10 +24,55 @@ const navItems = [
 
 export function Navigation() {
   const pathname = usePathname();
-  const { data: session, status } = useSession();
+  const router = useRouter();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSigningOut, setIsSigningOut] = useState(false);
 
-  const isLoading = status === "loading";
+  const supabase = createClient();
+
+  // Check auth state on mount and subscribe to changes
+  useEffect(() => {
+    // Get initial session
+    const getUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setUser(user);
+      setIsLoading(false);
+    };
+
+    getUser();
+
+    // Subscribe to auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        setUser(session?.user ?? null);
+        
+        // Refresh the page on sign in/out to update server components
+        if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
+          router.refresh();
+        }
+      }
+    );
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [supabase, router]);
+
+  // Handle sign out
+  const handleSignOut = async () => {
+    setIsSigningOut(true);
+    try {
+      await supabase.auth.signOut();
+      router.push("/");
+      router.refresh();
+    } catch (error) {
+      console.error("Sign out error:", error);
+    } finally {
+      setIsSigningOut(false);
+    }
+  };
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -42,13 +88,13 @@ export function Navigation() {
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center gap-6">
-            {session && navItems.map((item) => (
+            {user && navItems.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
                 className={cn(
                   "text-sm font-medium transition-colors hover:text-primary",
-                  pathname === item.href
+                  pathname === item.href || pathname.startsWith(item.href + "/")
                     ? "text-primary"
                     : "text-muted-foreground"
                 )}
@@ -60,27 +106,21 @@ export function Navigation() {
             {/* Auth Section */}
             {isLoading ? (
               <div className="w-8 h-8 rounded-full bg-muted animate-pulse" />
-            ) : session ? (
+            ) : user ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon" className="rounded-full">
-                    {session.user?.image ? (
-                      <img
-                        src={session.user.image}
-                        alt={session.user.name || "User"}
-                        className="w-8 h-8 rounded-full"
-                      />
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                        <User className="w-4 h-4 text-primary" />
-                      </div>
-                    )}
+                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                      <User className="w-4 h-4 text-primary" />
+                    </div>
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
                   <div className="px-2 py-1.5">
-                    <p className="text-sm font-medium">{session.user?.name}</p>
-                    <p className="text-xs text-muted-foreground">{session.user?.email}</p>
+                    <p className="text-sm font-medium truncate">
+                      {user.user_metadata?.full_name || user.email?.split("@")[0] || "User"}
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">{user.email}</p>
                   </div>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem asChild>
@@ -91,16 +131,21 @@ export function Navigation() {
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
-                    onClick={() => signOut({ callbackUrl: "/" })}
+                    onClick={handleSignOut}
+                    disabled={isSigningOut}
                     className="cursor-pointer text-destructive focus:text-destructive"
                   >
-                    <LogOut className="w-4 h-4 mr-2" />
+                    {isSigningOut ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <LogOut className="w-4 h-4 mr-2" />
+                    )}
                     Sign Out
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
-              <Link href="/auth/signin">
+              <Link href="/auth/login">
                 <Button size="sm">Sign In</Button>
               </Link>
             )}
@@ -108,7 +153,7 @@ export function Navigation() {
 
           {/* Mobile Menu Button */}
           <div className="flex items-center gap-2 md:hidden">
-            {session && (
+            {user && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon" className="rounded-full">
@@ -117,14 +162,21 @@ export function Navigation() {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <div className="px-2 py-1.5">
-                    <p className="text-sm font-medium">{session.user?.name}</p>
+                    <p className="text-sm font-medium truncate">
+                      {user.user_metadata?.full_name || user.email?.split("@")[0] || "User"}
+                    </p>
                   </div>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
-                    onClick={() => signOut({ callbackUrl: "/" })}
+                    onClick={handleSignOut}
+                    disabled={isSigningOut}
                     className="cursor-pointer"
                   >
-                    <LogOut className="w-4 h-4 mr-2" />
+                    {isSigningOut ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <LogOut className="w-4 h-4 mr-2" />
+                    )}
                     Sign Out
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -148,7 +200,7 @@ export function Navigation() {
         {mobileMenuOpen && (
           <nav className="md:hidden pb-4">
             <div className="flex flex-col gap-2">
-              {session ? (
+              {user ? (
                 navItems.map((item) => (
                   <Link
                     key={item.href}
@@ -156,7 +208,7 @@ export function Navigation() {
                     onClick={() => setMobileMenuOpen(false)}
                     className={cn(
                       "px-4 py-2 rounded-md text-sm font-medium transition-colors",
-                      pathname === item.href
+                      pathname === item.href || pathname.startsWith(item.href + "/")
                         ? "bg-primary text-primary-foreground"
                         : "hover:bg-muted"
                     )}
@@ -166,7 +218,7 @@ export function Navigation() {
                 ))
               ) : (
                 <Link
-                  href="/auth/signin"
+                  href="/auth/login"
                   onClick={() => setMobileMenuOpen(false)}
                   className="px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground"
                 >

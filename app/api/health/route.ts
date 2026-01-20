@@ -4,6 +4,11 @@
  * Provides system status for monitoring and alerting.
  * Returns sanitized status information (no secrets).
  * 
+ * SECURITY: This is a PUBLIC endpoint (no auth required)
+ * - Does not expose any sensitive information
+ * - Does not expose user data
+ * - Only returns service status
+ * 
  * Usage:
  * - Vercel health checks
  * - Uptime monitoring (e.g., UptimeRobot, Pingdom)
@@ -12,7 +17,7 @@
 
 import { NextResponse } from "next/server";
 import { isGeminiConfigured, getUsageMetrics } from "@/lib/gemini";
-import { isRedisRateLimitEnabled, getClientIdentifier } from "@/lib/utils/rate-limiter";
+import { isRedisRateLimitEnabled } from "@/lib/utils/rate-limiter";
 import { getQueueStats, isQueueHealthy } from "@/lib/utils/request-queue";
 
 export const runtime = "nodejs";
@@ -27,7 +32,7 @@ interface HealthStatus {
     gemini: ServiceStatus;
     redis: ServiceStatus;
     queue: ServiceStatus;
-    auth: ServiceStatus;
+    supabase: ServiceStatus;
   };
   metrics?: {
     queue: {
@@ -55,7 +60,7 @@ export async function GET(request: Request): Promise<NextResponse<HealthStatus>>
     gemini: checkGeminiStatus(),
     redis: checkRedisStatus(),
     queue: checkQueueStatus(),
-    auth: checkAuthStatus(),
+    supabase: checkSupabaseStatus(),
   };
 
   // Determine overall status
@@ -180,31 +185,32 @@ function checkQueueStatus(): ServiceStatus {
 }
 
 /**
- * Check authentication configuration
+ * Check Supabase configuration status
  */
-function checkAuthStatus(): ServiceStatus {
-  const hasNextAuthSecret = !!process.env.NEXTAUTH_SECRET;
-  const hasOAuthProvider = !!(
-    (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) ||
-    (process.env.GITHUB_ID && process.env.GITHUB_SECRET)
-  );
+function checkSupabaseStatus(): ServiceStatus {
+  const hasSupabaseUrl = !!process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const hasSupabaseAnonKey = !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const hasServiceRoleKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!hasNextAuthSecret) {
+  if (!hasSupabaseUrl || !hasSupabaseAnonKey) {
     return {
       status: "error",
-      message: "NEXTAUTH_SECRET not configured",
+      message: "Supabase not configured (missing URL or anon key)",
     };
   }
 
-  if (process.env.NODE_ENV === "production" && !hasOAuthProvider) {
-    return {
-      status: "degraded",
-      message: "No OAuth provider configured (credentials only)",
-    };
+  if (!hasServiceRoleKey) {
+    // Service role key is optional but recommended
+    if (process.env.NODE_ENV === "production") {
+      return {
+        status: "degraded",
+        message: "Service role key not configured (some admin features unavailable)",
+      };
+    }
   }
 
   return {
     status: "ok",
-    message: hasOAuthProvider ? "OAuth configured" : "Credentials auth configured",
+    message: "Supabase configured",
   };
 }
